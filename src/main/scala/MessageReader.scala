@@ -1,66 +1,43 @@
 package beam.protocolvis
 
-import cats.effect.{Resource, Sync}
-import cats.syntax.all._
-import com.univocity.parsers.common.record.Record
-import com.univocity.parsers.csv.{CsvParser, CsvParserSettings}
+import cats.effect.{Blocker, ContextShift, Sync}
+import fs2._
+import fs2.data.csv._
 
-import java.io.InputStream
-import java.nio.file.{FileSystems, Path}
+import java.nio.file.Path
 
 /**
  * @author Dmitry Openkov
  */
 object MessageReader {
 
-  def readData[F[_] : Sync](path: Path): F[IndexedSeq[RowData]] = {
-    openFileForReading(path).use { inputStream =>
-      readCsv(inputStream)
-    }
+  def readData[F[_] : Sync](path: Path, blocker: Blocker)(implicit cs: ContextShift[F]): Stream[F, RowData] = {
+    io.file.readAll(path, blocker, 1024)
+      .through(text.utf8Decode)
+      .flatMap(Stream.emits(_))
+      .through(rows[F]())
+      .through(headers[F, String])
+      .map(rowToRowData)
   }
 
-  def readCsv[F[_] : Sync](inputStream: InputStream): F[IndexedSeq[RowData]] = {
-    import scala.jdk.CollectionConverters._
-    for {
-      parser <- createParser
-      result <- Sync[F].delay(parser.parseAllRecords(inputStream).asScala.toIndexedSeq)
-    } yield result.map(recordToRowData)
-  }
-
-  private def recordToRowData(record: Record): RowData = {
-    def extractActor(record: Record, position: String) = {
-      val parent = record.getString(s"${position}_parent")
-      val name = record.getString(s"${position}_name")
+  private def rowToRowData(row: CsvRow[String]): RowData = {
+    def extractActor(record: CsvRow[String], position: String) = {
+      val parent = record(s"${position}_parent").get
+      val name = record(s"${position}_name").get
       Actor(parent, name)
     }
 
-    record.getString("type") match {
+    row("type").get match {
       case "message" =>
-        Message(extractActor(record, "sender"), extractActor(record, "receiver"), record.getString("payload"))
+        Message(extractActor(row, "sender"), extractActor(row, "receiver"), row("payload").get)
       case "event" =>
-        Event(extractActor(record, "sender"), extractActor(record, "receiver"), record.getString("payload"),
-          record.getString("state"))
+        Event(extractActor(row, "sender"), extractActor(row, "receiver"), row("payload").get,
+          row("state").get)
       case "transition" =>
-        Event(extractActor(record, "sender"), extractActor(record, "receiver"), record.getString("payload"),
-          record.getString("state"))
+        Event(extractActor(row, "sender"), extractActor(row, "receiver"), row("payload").get,
+          row("state").get)
     }
   }
-
-  private def createParser[F[_] : Sync]: F[CsvParser] = {
-    Sync[F].delay {
-      val settings = new CsvParserSettings
-      settings.setHeaderExtractionEnabled(true)
-      settings.getFormat.setLineSeparator("\n")
-      new CsvParser(settings)
-    }
-  }
-
-  def openFileForReading[F[_] : Sync](path: Path): Resource[F, InputStream] =
-    Resource.make {
-      Sync[F].delay(FileSystems.getDefault.provider().newInputStream(path)) // build
-    } { inStream =>
-      Sync[F].delay(inStream.close()).handleErrorWith(_ => Sync[F].unit)
-    }
 
 
   sealed abstract class RowData {

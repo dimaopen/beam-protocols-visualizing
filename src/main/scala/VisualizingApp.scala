@@ -1,10 +1,9 @@
 package beam.protocolvis
 
-import cats._
+import cats.effect.{Blocker, ExitCode, IO, IOApp}
 import cats.implicits._
-import cats.effect.{ExitCode, IO, IOApp}
 
-import java.nio.file.{Files, Paths}
+import java.nio.file.Paths
 
 /**
  * @author Dmitry Openkov
@@ -16,10 +15,14 @@ object VisualizingApp extends IOApp {
         println(s"Wrong args: $error")
         ExitCode.Error
       }
-      case Right(argMap) => for {
-        data <- MessageReader.readData[IO](Paths.get(argMap("input")))
-        _ <- IO { data.foreach(println) }
-      } yield ExitCode.Success
+      case Right(argMap) =>
+        Blocker[IO].use { blocker =>
+          val csvStream = MessageReader.readData[IO](Paths.get(argMap("input")), blocker)
+          for {
+            data <- csvStream.compile.toVector
+            _ = data.foreach(println)
+          } yield ExitCode.Success
+        }
 
     }
   }
