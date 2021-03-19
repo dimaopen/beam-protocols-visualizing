@@ -34,7 +34,7 @@ object MessageReader {
         Event(extractActor(row, "sender"), extractActor(row, "receiver"), row("payload").get,
           row("state").get)
       case "transition" =>
-        Event(extractActor(row, "sender"), extractActor(row, "receiver"), row("payload").get,
+        Transition(extractActor(row, "sender"), extractActor(row, "receiver"), row("payload").get,
           row("state").get)
     }
   }

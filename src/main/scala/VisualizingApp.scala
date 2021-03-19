@@ -3,6 +3,8 @@ package beam.protocolvis
 import cats.effect.{Blocker, ExitCode, IO, IOApp}
 import cats.implicits._
 
+import fs2._
+
 import java.nio.file.Paths
 
 /**
@@ -17,11 +19,9 @@ object VisualizingApp extends IOApp {
       }
       case Right(argMap) =>
         Blocker[IO].use { blocker =>
-          val csvStream = MessageReader.readData[IO](Paths.get(argMap("input")), blocker)
-          for {
-            data <- csvStream.compile.toVector
-            _ = data.foreach(println)
-          } yield ExitCode.Success
+          val csvStream: Stream[IO, MessageReader.RowData] = MessageReader.readData[IO](Paths.get(argMap("input")), blocker)
+          val puml: Stream[IO, MessageSequenceProcessor.PumlEntry] = MessageSequenceProcessor.processMessages(csvStream)
+          PumlWriter.writeData[IO](puml, Paths.get(argMap("output")), blocker).compile.drain >> IO(ExitCode.Success)
         }
 
     }
