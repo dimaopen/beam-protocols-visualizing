@@ -14,10 +14,10 @@ lazy val root = (project in file("."))
     scalaVersion := "2.13.4",
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-effect" % "2.3.1",
-      //      "com.univocity" % "univocity-parsers" % "2.9.1",
       "org.gnieh" %% "fs2-data-csv" % "0.9.0",
       "co.fs2" %% "fs2-core" % "2.4.4",
       "co.fs2" %% "fs2-io" % "2.4.4",
+      "com.github.scopt" %% "scopt" % "4.0.1",
     ),
     addCompilerPlugin("org.typelevel" %% "kind-projector" % "0.10.3"),
     addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1"),
