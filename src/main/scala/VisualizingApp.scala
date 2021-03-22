@@ -2,10 +2,9 @@ package beam.protocolvis
 
 import cats.effect.{Blocker, ExitCode, IO, IOApp}
 import cats.implicits._
-
 import fs2._
 
-import java.nio.file.Paths
+import java.nio.file.{NoSuchFileException, Paths}
 
 /**
  * @author Dmitry Openkov
@@ -19,9 +18,14 @@ object VisualizingApp extends IOApp {
       }
       case Right(argMap) =>
         Blocker[IO].use { blocker =>
-          val csvStream: Stream[IO, MessageReader.RowData] = MessageReader.readData[IO](Paths.get(argMap("input")), blocker)
+          val inputFile = argMap("input")
+          val csvStream: Stream[IO, MessageReader.RowData] = MessageReader.readData[IO](Paths.get(inputFile), blocker)
           val puml: Stream[IO, MessageSequenceProcessor.PumlEntry] = MessageSequenceProcessor.processMessages(csvStream)
-          PumlWriter.writeData[IO](puml, Paths.get(argMap("output")), blocker).compile.drain >> IO(ExitCode.Success)
+          PumlWriter.writeData[IO](puml, Paths.get(argMap("output")), blocker).compile.drain.as(ExitCode.Success)
+            .handleErrorWith {
+              case _: NoSuchFileException => IO.delay(println(s"File not found: $inputFile")).as(ExitCode.Error)
+              case x: Throwable => IO.delay(println(s"Error: ${x.getMessage}")).as(ExitCode.Error)
+            }
         }
 
     }
