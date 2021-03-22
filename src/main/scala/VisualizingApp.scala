@@ -20,7 +20,7 @@ object VisualizingApp extends IOApp {
       }
       case Right(cliOptions) =>
         for {
-          confirm <- confirmOverwrite(cliOptions.output)
+          confirm <- confirmOverwrite(cliOptions.output, cliOptions.forceOverwriting)
           exitCode <- if (confirm) doJob(cliOptions.input, cliOptions.output) else IO.delay {
             println("Exiting...")
             ExitCode.Error
@@ -43,9 +43,9 @@ object VisualizingApp extends IOApp {
     }
   }
 
-  private def confirmOverwrite(path: Path): IO[Boolean] = {
+  private def confirmOverwrite(path: Path, force: Boolean): IO[Boolean] = {
     for {
-      exists <- IO.delay(Files.exists(path))
+      exists <- if (force) IO.pure(false) else IO.delay(Files.exists(path))
       overwrite <- if (exists) askUserYesNoQuestion("File exits. Overwrite? (Y/n)", default = true) else IO.pure(true)
     } yield overwrite
   }
@@ -90,6 +90,10 @@ object VisualizingApp extends IOApp {
           .valueName("<file>")
           .action((x, c) => c.copy(output = x.toPath))
           .text("path where to save the generated puml file"),
+        opt[Unit]('f', "force")
+          .optional()
+          .action((_, c) => c.copy(forceOverwriting = true))
+          .text("overwrite output file"),
       )
     }
     OParser.runParser(parser1, args, CliOptions()) match {
@@ -98,6 +102,6 @@ object VisualizingApp extends IOApp {
     }
   }
 
-  case class CliOptions(input: Path = Paths.get("."), output: Path = Paths.get("."))
+  case class CliOptions(input: Path = Paths.get("."), output: Path = Paths.get("."), forceOverwriting: Boolean = false)
 
 }
