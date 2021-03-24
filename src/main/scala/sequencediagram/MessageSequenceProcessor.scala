@@ -1,15 +1,18 @@
 package beam.protocolvis
+package sequencediagram
 
 import MessageReader._
 
-import fs2._
+import cats.effect.{Blocker, ContextShift, Sync}
+import fs2.{Chunk, Pipe, Pull, Stream}
 
+import java.nio.file.Path
 import scala.util.matching.Regex
 
 /**
  * @author Dmitry Openkov
  */
-object MessageSequenceProcessor {
+object MessageSequenceProcessor extends MessageProcessor {
 
   def processMessages[F[_]](messages: Stream[F, RowData]): Stream[F, PumlEntry] = {
     messages.through(fixTransitionEvent[F])
@@ -24,6 +27,7 @@ object MessageSequenceProcessor {
   }
 
   private val PayloadRegex: Regex = """(\w+)\(([^()]+).*""".r
+
   private def userFriendlyPayload(payload: String): String = {
     payload match {
       case PayloadRegex("TriggerWithId", internal) => internal
@@ -33,6 +37,7 @@ object MessageSequenceProcessor {
   }
 
   private val PersonIdRegex: Regex = """\d+(-\d+){1,}""".r
+
   private def userFriendlyActorName(actor: Actor) = {
     val isParentPopulation = actor.parent == "population"
     val isParentHousehold = actor.parent.startsWith("population/")
@@ -71,4 +76,11 @@ object MessageSequenceProcessor {
 
   case class Interaction(from: String, to: String, payload: String) extends PumlEntry
 
+  override def convertToPuml[F[_] : Sync : ContextShift](messages: Stream[F, RowData], output: Path, blocker: Blocker): Stream[F, Unit] = {
+    val pumlEntries = processMessages(messages)
+    PumlWriter.writeData(pumlEntries, output, blocker) {
+      case Note(over, value) => s"""rnote over "$over": $value"""
+      case Interaction(from, to, payload) => s""""$from" -> "$to": $payload"""
+    }
+  }
 }

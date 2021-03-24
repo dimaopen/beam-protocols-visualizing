@@ -1,5 +1,7 @@
 package beam.protocolvis
 
+import sequencediagram.MessageSequenceProcessor
+
 import cats.effect.{Blocker, ExitCode, IO, IOApp}
 import cats.implicits._
 import fs2._
@@ -34,13 +36,16 @@ object VisualizingApp extends IOApp {
   private def doJob(inputFile: Path, output: Path): IO[ExitCode] = {
     Blocker[IO].use { blocker =>
       val csvStream: Stream[IO, MessageReader.RowData] = MessageReader.readData[IO](inputFile, blocker)
-      val puml: Stream[IO, MessageSequenceProcessor.PumlEntry] = MessageSequenceProcessor.processMessages(csvStream)
-      PumlWriter.writeData[IO](puml, output, blocker).compile.drain.as(ExitCode.Success)
+      createMessageProcessor().convertToPuml(csvStream, output, blocker).compile.drain.as(ExitCode.Success)
         .handleErrorWith {
           case _: NoSuchFileException => IO.delay(println(s"File not found: $inputFile")).as(ExitCode.Error)
           case x: Throwable => IO.delay(println(s"Error: ${x.getMessage}")).as(ExitCode.Error)
         }
     }
+  }
+
+  private def createMessageProcessor(): MessageProcessor = {
+    MessageSequenceProcessor
   }
 
   private def confirmOverwrite(path: Path, force: Boolean): IO[Boolean] = {
