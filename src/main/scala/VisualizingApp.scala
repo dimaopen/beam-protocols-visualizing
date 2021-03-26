@@ -1,5 +1,6 @@
 package beam.protocolvis
 
+import Extractors.{AllMessages, ByPerson, ExtractorType}
 import sequencediagram.MessageSequenceProcessor
 
 import cats.effect.{Blocker, ExitCode, IO, IOApp}
@@ -23,24 +24,28 @@ object VisualizingApp extends IOApp {
       case Right(cliOptions) =>
         for {
           confirm <- confirmOverwrite(cliOptions.output, cliOptions.forceOverwriting)
-          exitCode <- if (confirm) doJob(cliOptions.input, cliOptions.output) else IO.delay {
+          extractorType = if (cliOptions.personId.isEmpty) AllMessages else ByPerson(cliOptions.personId)
+          exitCode <- if (confirm) doJob(cliOptions.input, cliOptions.output, extractorType) else IO.delay {
             println("Exiting...")
             ExitCode.Error
           }
         } yield exitCode
-
-
     }
   }
 
-  private def doJob(inputFile: Path, output: Path): IO[ExitCode] = {
+  private def doJob(inputFile: Path, output: Path, extractorType: ExtractorType): IO[ExitCode] = {
     Blocker[IO].use { blocker =>
       val csvStream: Stream[IO, MessageReader.RowData] = MessageReader.readData[IO](inputFile, blocker)
-      createMessageProcessor().convertToPuml(csvStream, output, blocker).compile.drain.as(ExitCode.Success)
-        .handleErrorWith {
-          case _: NoSuchFileException => IO.delay(println(s"File not found: $inputFile")).as(ExitCode.Error)
-          case x: Throwable => IO.delay(println(s"Error: ${x.getMessage}")).as(ExitCode.Error)
-        }
+      val extractor = Extractors.messageExtractor[IO](extractorType)
+      for {
+        extracted <- extractor(csvStream)
+        puml = createMessageProcessor().convertToPuml(extracted, output, blocker)
+        result <- puml.compile.drain.as(ExitCode.Success)
+          .handleErrorWith {
+            case _: NoSuchFileException => IO.delay(println(s"File not found: $inputFile")).as(ExitCode.Error)
+            case x: Throwable => IO.delay(println(s"Error: ${x.getMessage}")).as(ExitCode.Error)
+          }
+      } yield result
     }
   }
 
@@ -99,6 +104,10 @@ object VisualizingApp extends IOApp {
           .optional()
           .action((_, c) => c.copy(forceOverwriting = true))
           .text("overwrite output file"),
+        opt[String]('p', "person-id")
+          .optional()
+          .action((x, c) => c.copy(personId = x))
+          .text("person id to build the message sequence for"),
       )
     }
     OParser.runParser(parser1, args, CliOptions()) match {
@@ -107,6 +116,10 @@ object VisualizingApp extends IOApp {
     }
   }
 
-  case class CliOptions(input: Path = Paths.get("."), output: Path = Paths.get("."), forceOverwriting: Boolean = false)
+  case class CliOptions(input: Path = Paths.get("."),
+                        output: Path = Paths.get("."),
+                        forceOverwriting: Boolean = false,
+                        personId: String = "",
+                       )
 
 }

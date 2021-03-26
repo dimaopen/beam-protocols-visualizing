@@ -13,6 +13,8 @@ object MessageReader {
 
   def readData[F[_] : Sync](path: Path, blocker: Blocker)(implicit cs: ContextShift[F]): Stream[F, RowData] = {
     io.file.readAll(path, blocker, 1024)
+//      .through(compression.gunzip())
+//      .flatMap(_.content)
       .through(text.utf8Decode)
       .flatMap(Stream.emits(_))
       .through(rows[F]())
@@ -29,13 +31,14 @@ object MessageReader {
 
     row("type").get match {
       case "message" =>
-        Message(extractActor(row, "sender"), extractActor(row, "receiver"), row("payload").get)
+        Message(extractActor(row, "sender"), extractActor(row, "receiver"), row("payload").get,
+          row("triggerId").get.toLong)
       case "event" =>
         Event(extractActor(row, "sender"), extractActor(row, "receiver"), row("payload").get,
-          row("state").get)
+          row("state").get, row("triggerId").get.toLong)
       case "transition" =>
         Transition(extractActor(row, "sender"), extractActor(row, "receiver"), row("payload").get,
-          row("state").get)
+          row("state").get, row("triggerId").get.toLong)
     }
   }
 
@@ -45,6 +48,7 @@ object MessageReader {
 
     def receiver: Actor
 
+    def triggerId: Long
   }
 
   case class Event(
@@ -52,12 +56,14 @@ object MessageReader {
                     receiver: Actor,
                     payload: String,
                     data: String,
+                    triggerId: Long,
                   ) extends RowData
 
   case class Message(
                       sender: Actor,
                       receiver: Actor,
                       payload: String,
+                      triggerId: Long,
                     ) extends RowData
 
   case class Transition(
@@ -65,6 +71,7 @@ object MessageReader {
                          receiver: Actor,
                          prevState: String,
                          state: String,
+                         triggerId: Long,
                        ) extends RowData
 
   case class Actor(parent: String, name: String)
