@@ -10,6 +10,7 @@ import scopt.{OEffect, OParser}
 
 import java.io.File
 import java.nio.file.{Files, NoSuchFileException, Path, Paths}
+import java.time.LocalTime
 
 /**
  * @author Dmitry Openkov
@@ -34,17 +35,22 @@ object VisualizingApp extends IOApp {
   }
 
   private def doJob(inputFile: Path, output: Path, extractorType: ExtractorType): IO[ExitCode] = {
+    import java.time.temporal.ChronoUnit.SECONDS
     Blocker[IO].use { blocker =>
       val csvStream: Stream[IO, MessageReader.RowData] = MessageReader.readData[IO](inputFile, blocker)
       val extractor = Extractors.messageExtractor[IO](extractorType)
       for {
+        startTime <- IO(LocalTime.now())
+        _ <- IO(println(s"$startTime: start reading from $inputFile"))
         extracted <- extractor(csvStream)
         puml = createMessageProcessor().convertToPuml(extracted, output, blocker)
-        result <- puml.compile.drain.as(ExitCode.Success)
+        result <- csvStream.compile.drain.as(ExitCode.Success)
           .handleErrorWith {
             case _: NoSuchFileException => IO.delay(println(s"File not found: $inputFile")).as(ExitCode.Error)
             case x: Throwable => IO.delay(println(s"Error: ${x.getMessage}")).as(ExitCode.Error)
           }
+        endTime <- IO(LocalTime.now())
+         _ <- IO(println(s"exiting at $endTime, execution time = ${SECONDS.between(startTime, endTime)}"))
       } yield result
     }
   }

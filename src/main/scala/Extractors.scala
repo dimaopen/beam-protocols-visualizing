@@ -3,25 +3,25 @@ package beam.protocolvis
 import MessageReader.RowData
 
 import cats.effect.Sync
-import cats.implicits._
-import fs2.Stream
+import fs2.{Chunk, Stream}
 
 /**
  * @author Dmitry Openkov
  */
 object Extractors {
+
   def byPerson[F[_] : Sync](personId: String): Function[Stream[F, RowData], F[Stream[F, RowData]]] = {
     stream =>
-      val triggerIds = stream.collect {
-        case row if row.triggerId >= 0 & isSenderOrReceiver(personId, row) => row.triggerId
-      }.compile.to(Set)
-
-
-      for {
-        ids <- triggerIds
-      } yield stream.filter { row =>
-        ids.contains(row.triggerId) || isSenderOrReceiver(personId, row)
-      }
+      Sync[F].pure(
+        stream.scanChunks(Set.empty[Long]) { case (ids, chunk) =>
+          val (newIds, seq) = chunk.foldLeft(ids -> IndexedSeq.empty[RowData]) { case ((ids, seq), row) =>
+            if (isSenderOrReceiver(personId, row)) (if (row.triggerId >= 0) ids + row.triggerId else ids, seq :+ row)
+            else if (ids.contains(row.triggerId)) (ids + row.triggerId, seq :+ row)
+            else (ids, seq)
+          }
+          (newIds, Chunk.indexedSeq(seq))
+        }
+      )
   }
 
 
@@ -32,7 +32,7 @@ object Extractors {
   def messageExtractor[F[_] : Sync](extractorType: ExtractorType): Function[Stream[F, RowData], F[Stream[F, RowData]]] =
     extractorType match {
       case AllMessages => Sync[F].pure(_)
-      case ByPerson(id) =>byPerson(id)
+      case ByPerson(id) => byPerson(id)
     }
 
   sealed trait ExtractorType

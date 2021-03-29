@@ -12,9 +12,23 @@ import java.nio.file.Path
 object MessageReader {
 
   def readData[F[_] : Sync](path: Path, blocker: Blocker)(implicit cs: ContextShift[F]): Stream[F, RowData] = {
-    io.file.readAll(path, blocker, 1024)
-//      .through(compression.gunzip())
-//      .flatMap(_.content)
+    val chunkSize = 32 * 1024
+
+    def readFile(path: Path): Stream[F, Byte] = {
+      import java.nio.file.FileSystems
+      val matcher = FileSystems.getDefault.getPathMatcher("glob:*.gz")
+
+      val fileData = io.file.readAll(path, blocker, chunkSize)
+
+      if (matcher.matches(path))
+        fileData
+          .through(compression.gunzip(chunkSize))
+          .flatMap(_.content)
+      else
+        fileData
+    }
+
+    readFile(path)
       .through(text.utf8Decode)
       .flatMap(Stream.emits(_))
       .through(rows[F]())
@@ -75,4 +89,5 @@ object MessageReader {
                        ) extends RowData
 
   case class Actor(parent: String, name: String)
+
 }
