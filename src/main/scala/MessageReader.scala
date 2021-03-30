@@ -1,39 +1,67 @@
 package beam.protocolvis
 
 import cats.effect.{Blocker, ContextShift, Sync}
+import cats.syntax.flatMap._
+import cats.syntax.functor._
+import cats.syntax.traverse._
 import fs2._
 import fs2.data.csv._
 
-import java.nio.file.Path
+import java.nio.file.{Files, Path}
 
 /**
  * @author Dmitry Openkov
  */
 object MessageReader {
 
-  def readData[F[_] : Sync](path: Path, blocker: Blocker)(implicit cs: ContextShift[F]): Stream[F, RowData] = {
+  def readData[F[_] : Sync](path: Path, blocker: Blocker)(implicit cs: ContextShift[F]): F[Stream[F, RowData]] = {
     val chunkSize = 32 * 1024
 
-    def readFile(path: Path): Stream[F, Byte] = {
+    def readSingleFile(path: Path): F[Stream[F, RowData]] = {
       import java.nio.file.FileSystems
-      val matcher = FileSystems.getDefault.getPathMatcher("glob:*.gz")
-
       val fileData = io.file.readAll(path, blocker, chunkSize)
-
-      if (matcher.matches(path))
-        fileData
+      for {
+        matcher <- Sync[F].delay(FileSystems.getDefault.getPathMatcher("glob:*.gz"))
+        isGzip = matcher.matches(path.getFileName)
+        data = if (isGzip) fileData
           .through(compression.gunzip(chunkSize))
           .flatMap(_.content)
-      else
-        fileData
+        else fileData
+      } yield data
+        .through(text.utf8Decode)
+        .flatMap(Stream.emits(_))
+        .through(rows[F]())
+        .through(headers[F, String])
+        .map(rowToRowData)
+
     }
 
-    readFile(path)
-      .through(text.utf8Decode)
-      .flatMap(Stream.emits(_))
-      .through(rows[F]())
-      .through(headers[F, String])
-      .map(rowToRowData)
+    def findFiles(dir: Path): F[Seq[Path]] = {
+      val FileNum = """actor_messages_(\d+)""".r.unanchored
+      import scala.jdk.CollectionConverters._
+      for {
+        paths <- Sync[F].delay(Files.newDirectoryStream(dir, "*.actor_messages_*.csv.gz").iterator().asScala.toSeq)
+        pathWithNum = paths
+          .map(path => path -> path.getFileName.toString)
+          .collect {
+            case (path, FileNum(num)) => path -> num.toInt
+          }
+        sorted = pathWithNum.sortBy { case (_, num) => num }
+      } yield sorted.map { case (path, _) => path }
+    }
+
+    def readFromDir(path: Path): F[Stream[F, RowData]] =
+      for {
+        files <- findFiles(path)
+        fileStreamSeq <- files.traverse(readSingleFile)
+      } yield Stream.emits(fileStreamSeq).flatten
+
+
+    for {
+      isDirectory <- Sync[F].delay(Files.isDirectory(path))
+      data <- if (isDirectory) readFromDir(path) else readSingleFile(path)
+    } yield data
+
   }
 
   private def rowToRowData(row: CsvRow[String]): RowData = {
