@@ -25,7 +25,7 @@ object Extractors {
   }
 
 
-  private def isSenderOrReceiver[F[_] : Sync](personId: String, row: RowData) = {
+  private def isSenderOrReceiver(personId: String, row: RowData) = {
     row.sender.name == personId || row.receiver.name == personId
   }
 

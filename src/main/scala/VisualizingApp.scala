@@ -43,8 +43,9 @@ object VisualizingApp extends IOApp {
         _ <- IO(println(s"${startTime.toLocalTime}: start reading from $inputFile"))
         csvStream <- MessageReader.readData[IO](inputFile, blocker)
         extracted <- extractor(csvStream)
-        puml = createMessageProcessor().convertToPuml(extracted, output, blocker)
-        result <- puml.compile.drain.as(ExitCode.Success)
+        puml = MessageSequenceProcessor.processMessages(extracted)
+        written = PumlWriter.writeData(puml, output, blocker)(MessageSequenceProcessor.serializer)
+        result <- written.compile.drain.as(ExitCode.Success)
           .handleErrorWith {
             case _: NoSuchFileException => IO.delay(println(s"File not found: $inputFile")).as(ExitCode.Error)
             case x: Throwable => IO.delay(println(s"Error: ${x.getMessage}")).as(ExitCode.Error)
@@ -53,10 +54,6 @@ object VisualizingApp extends IOApp {
         _ <- IO(println(s"exiting at ${endTime.toLocalTime}, execution time = ${SECONDS.between(startTime, endTime)} seconds"))
       } yield result
     }
-  }
-
-  private def createMessageProcessor(): MessageProcessor = {
-    MessageSequenceProcessor
   }
 
   private def confirmOverwrite(path: Path, force: Boolean): IO[Boolean] = {

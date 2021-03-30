@@ -3,25 +3,23 @@ package sequencediagram
 
 import MessageReader._
 
-import cats.effect.{Blocker, ContextShift, Sync}
 import fs2.{Chunk, Pipe, Pull, Stream}
 
-import java.nio.file.Path
 import scala.util.matching.Regex
 
 /**
  * @author Dmitry Openkov
  */
-object MessageSequenceProcessor extends MessageProcessor {
+object MessageSequenceProcessor {
 
   def processMessages[F[_]](messages: Stream[F, RowData]): Stream[F, PumlEntry] = {
     messages.through(fixTransitionEvent[F])
       .map {
-        case Event(sender, receiver, payload, _) =>
+        case Event(sender, receiver, payload, _, _) =>
           Interaction(userFriendlyActorName(sender), userFriendlyActorName(receiver), userFriendlyPayload(payload))
-        case Message(sender, receiver, payload) =>
+        case Message(sender, receiver, payload, _) =>
           Interaction(userFriendlyActorName(sender), userFriendlyActorName(receiver), userFriendlyPayload(payload))
-        case Transition(sender, receiver, _, state) =>
+        case Transition(_, receiver, _, state, _) =>
           Note(userFriendlyActorName(receiver), state)
       }
   }
@@ -36,7 +34,7 @@ object MessageSequenceProcessor extends MessageProcessor {
     }
   }
 
-  private val PersonIdRegex: Regex = """\d+(-\d+){1,}""".r
+  private val PersonIdRegex: Regex = """\d+(-\d+)+""".r
 
   private def userFriendlyActorName(actor: Actor) = {
     val isParentPopulation = actor.parent == "population"
@@ -76,11 +74,8 @@ object MessageSequenceProcessor extends MessageProcessor {
 
   case class Interaction(from: String, to: String, payload: String) extends PumlEntry
 
-  override def convertToPuml[F[_] : Sync : ContextShift](messages: Stream[F, RowData], output: Path, blocker: Blocker): Stream[F, Unit] = {
-    val pumlEntries = processMessages(messages)
-    PumlWriter.writeData(pumlEntries, output, blocker) {
-      case Note(over, value) => s"""rnote over "$over": $value"""
-      case Interaction(from, to, payload) => s""""$from" -> "$to": $payload"""
-    }
+  def serializer: PumlEntry => String = {
+    case Note(over, value)              => s"""rnote over "$over": $value"""
+    case Interaction(from, to, payload) => s""""$from" -> "$to": $payload"""
   }
 }
